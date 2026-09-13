@@ -1,0 +1,13 @@
+[Unit]
+Description=BC-250 temperature-based fan curve
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bc250-fancurve
+ExecStop=/usr/local/bin/bc250-fancurve --release
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

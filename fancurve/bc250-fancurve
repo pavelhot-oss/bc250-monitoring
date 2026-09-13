@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+#
+# bc250-fancurve — temperature-based fan curve for AMD BC-250
+#
+# Controls the CPU fan (PWM channel labeled "CPU Fan" on the NCT6686D)
+# from the hottest of {CPU die (k10temp), GPU edge (amdgpu)}.
+#
+# Curve (temp °C -> PWM) is defined by the TEMPS/PWMS arrays below and is
+# interpolated linearly. Steps are rate-limited so the fan ramps up quickly
+# when hot but don't oscillate around a threshold.
+#
+# Usage: bc250-fancurve [--release]
+#   (no args)  runs the control loop
+#   --release  hands control back to the firmware auto-curve  (used by ExecStop)
+#
+set -euo pipefail
+
+INTERVAL=2        # seconds between updates
+STEP_UP=10        # max PWM increase per cycle
+STEP_DOWN=8       # max PWM decrease per cycle (slower, avoids oscillation)
+MIN_PWM=45        # ~810 RPM on the stock fan; safe margin above stall
+MAX_PWM=255
+
+# curve points: heat (°C) -> pwm  (values in °C, pwm 0-255)
+TEMPS=(45 50 55 60 65 70)
+PWMS=(45 60 90 130 180 230)
+
+# ------------------------------------------------------------ detection
+find_sw() {
+    NCT=""; K10=""; GPU=""
+    for n in /sys/class/hwmon/hwmon*/name; do
+        case "$(cat "$n" 2>/dev/null)" in
+            nct6686) NCT="${n%/name}" ;;
+            k10temp) K10="${n%/name}" ;;
+            amdgpu)  GPU="${n%/name}" ;;
+        esac
+    done
+    FAN_CH=""
+    for f in "$NCT"/fan*_label; do
+        [ "$(cat "$f" 2>/dev/null)" = "CPU Fan" ] && FAN_CH="$(basename "$f" _label)" && break
+    done
+}
+
+wait_for_sw() {
+    for _ in $(seq 1 30); do
+        find_sw
+        [ -n "$NCT${K10}" ] && [ -n "$FAN_CH" ] && return 0
+        sleep 2
+    done
+    return 1
+}
+
+# ------------------------------------------------------------- curve
+# linear interpolation between TEMPS/PWMS points
+curve() {
+    local t=$1 i t0 t1 p0 p1
+    if (( t <= TEMPS[0] )); then echo "${PWMS[0]}"; return; fi
+    for (( i = 1; i < ${#TEMPS[@]}; i++ )); do
+        if (( t <= TEMPS[i] )); then
+            t0=${TEMPS[i-1]}; t1=${TEMPS[i]}; p0=${PWMS[i-1]}; p1=${PWMS[i]}
+            echo $(( p0 + (p1 - p0) * (t - t0) / (t1 - t0) )); return
+        fi
+    done
+    echo "${MAX_PWM}"
+}
+
+controlling_temp() {
+    local cpu=0 gpu=0
+    [ -n "$K10" ] && cpu=$(( $(cat "$K10/temp1_input" 2>/dev/null || echo 0) / 1000 ))
+    [ -n "$GPU" ] && gpu=$(( $(cat "$GPU/temp1_input" 2>/dev/null || echo 0) / 1000 ))
+    if (( cpu >= gpu )); then echo "$cpu"; else echo "$gpu"; fi
+}
+
+# -------------------------------------------------------------- release
+release() {
+    find_sw
+    [ -n "$NCT$FAN_CH" ] || return 0
+    echo 2 > "$NCT/pwm${FAN_CH#fan}_enable" 2>/dev/null || true
+    exit 0
+}
+
+# ---------------------------------------------------------------- loop
+run_loop() {
+    wait_for_sw || { echo "NCT6686/k10temp monitoring not found" >&2; exit 1; }
+
+    local pwm="$NCT/pwm${FAN_CH#fan}"
+    local cur="$MIN_PWM" target temp
+    echo 1 > "${pwm}_enable"          # manual control
+    echo "$cur" > "$pwm"
+
+    while true; do
+        temp="$(controlling_temp)"
+        target="$(curve "$temp")"
+
+        if   (( target > cur + STEP_UP  )); then cur=$((cur + STEP_UP))
+        elif (( target < cur - STEP_DOWN )); then cur=$((cur - STEP_DOWN))
+        else cur=$target
+        fi
+        (( cur > MAX_PWM )) && cur=$MAX_PWM
+        (( cur < MIN_PWM )) && cur=$MIN_PWM
+
+        echo "$cur" > "$pwm"
+        sleep "$INTERVAL"
+    done
+}
+
+case "${1:-}" in
+    --release) release ;;
+    *)         run_loop ;;
+esac

@@ -60,6 +60,39 @@ nvtop            # GPU temp, power, clocks
 
 - `setup.sh` — full reproducible setup
 - `50-nct6687-labels.patch` — label swap for the driver (default + msi_alt fan configs)
+- `fancurve/bc250-fancurve` — temperature-based fan controller (needs a 4-pin PWM fan)
+- `fancurve/bc250-fancurve.service` — systemd unit for it
+
+## Fan curve (optional)
+
+For software fan control you need a **4-pin PWM fan** on the CPU header — a 3-pin fan ignores PWM
+entirely (see gotchas). With one in place:
+
+```sh
+sudo install -Dm755 fancurve/bc250-fancurve /usr/local/bin/bc250-fancurve
+sudo install -Dm644 fancurve/bc250-fancurve.service /etc/systemd/system/bc250-fancurve.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now bc250-fancurve
+```
+
+How it works:
+
+- controls the PWM channel labeled `CPU Fan` (`fan2`/`pwm2`), detected dynamically — handles hwmon
+  renumbering between boots,
+- drives the fan from the **hottest of CPU die (`k10temp`) and GPU edge (`amdgpu`)**, since the APU
+  shares one heatsink,
+- interpolates linearly between curve points (default `45->50->55->60->65->70 °C` →
+  `45->60->90->130->180->230 PWM`), capped at 255,
+- rate-limits changes (fast ramps, slow coasts) so it never oscillates around a threshold,
+- floor of `MIN_PWM=45` (~810 RPM on the stock fan) keeps a safety margin above stall.
+
+Edit the `TEMPS`/`PWMS` arrays at the top of `bc250-fancurve` to tune. Stopping the service
+(`systemctl stop bc250-fancurve`) hands control back to the firmware auto-curve.
+
+```sh
+# watch it react
+watch -n2 'cat /sys/class/hwmon/hwmon*/pwm2 /sys/class/hwmon/hwmon*/fan2_input'
+```
 
 ## Notes & gotchas
 
