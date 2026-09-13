@@ -75,6 +75,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now bc250-fancurve
 ```
 
+Developed and validated with an **Arctic P12 Pro PWM** (120 mm, 4-pin) on a BC-250: PWM control is
+effective across its whole range (pwm 12 ≈ 480 RPM … pwm 255 ≈ 3070 RPM), so the default curve
+(pwm 45 ≈ 810 RPM floor) has ample headroom.
+
 How it works:
 
 - controls the PWM channel labeled `CPU Fan` (`fan2`/`pwm2`), detected dynamically — handles hwmon
