@@ -12,9 +12,21 @@ but **not** the motherboard sensors. Those live behind the board's **Nuvoton NCT
   - `nct6683` (in-kernel, read-only),
   - **`nct6687`** (out-of-tree, [Fred78290/nct6687d](https://github.com/Fred78290/nct6687d)) — full read + PWM fan control, and nicer labels.
 
-This repo installs `nct6687` via **DKMS** so the module is rebuilt automatically whenever Pakman
-updates the kernel, and applies a small patch that swaps the `CPU Fan` / `Pump Fan` labels
-(the physically-connected fan on BC-250 reads on the channel the driver calls `Pump Fan`).
+This repo installs `nct6687` so the module is rebuilt automatically whenever your
+package manager updates the kernel, and applies a small patch that swaps the
+`CPU Fan` / `Pump Fan` labels (the physically-connected fan on BC-250 reads on
+the channel the driver calls `Pump Fan`).
+
+## Supported distributions
+
+| Distro | Method | Notes |
+|---|---|---|
+| Arch / Omarchy / EndeavourOS | pacman + DKMS | native |
+| CachyOS | pacman + DKMS | headers pulled for the running `linux-cachyos` kernel |
+| Debian / Ubuntu | apt + DKMS | `linux-headers-$(uname -r)` |
+| Fedora / RHEL-likes | dnf + DKMS | `kernel-devel` |
+| SteamOS | manual build + `insmod` | immutable OS, see troubleshooting |
+| anything else | prints manual steps, no changes | |
 
 ## Usage
 
@@ -22,17 +34,20 @@ updates the kernel, and applies a small patch that swaps the `CPU Fan` / `Pump F
 ./setup.sh
 ```
 
-Run it after any Omarchy reinstall. It is idempotent.
+`setup.sh` detects the distro, installs prerequisites, builds the driver from
+source (applying the label patch), registers it with DKMS, writes the kernel
+module config, and loads the module. Idempotent — safe to re-run, and the
+natural thing to run after a reinstall.
 
 ## What it installs
 
 | Piece | Details |
 |---|---|
-| `nct6687d` driver | DKMS-registered, `force=true` |
+| `nct6687d` driver | built from source + label patch, DKMS-registered, `force=true` |
 | `/etc/modprobe.d/sensors.conf` | `blacklist nct6683`, `options nct6687 force=true` |
 | `/etc/modules-load.d/99-sensors.conf` | autoload `nct6687` at boot |
 | `/etc/sensors3.conf` | friendly fan/voltage labels (appended if missing) |
-| packages | `lm_sensors`, `nvtop`, `linux-headers`, `dkms`, `base-devel`, `git` |
+| packages | `lm_sensors`, `nvtop`, `dkms`, build tools, kernel headers matching the running kernel |
 
 ## Verify
 
@@ -58,12 +73,37 @@ nvtop            # GPU temp, power, clocks
 - Motorboard VRM voltages may read 0.00 V — the BC-250 shares rails with the VRM/PMIC that
   are not all wired to the Super I/O chip. Voltages +3.3V, AVSB and VBat are the useful ones.
 
-## Updating the label patch
+## Troubleshooting
 
-If a new upstream version of `nct6687d` shifts line numbers, regenerate the patch:
+### SteamOS / immutable distros
+SteamOS is Arch-derived but runs a read-only `/usr`: regular packages aren't installed via
+`pacman`, the OS is updated with `steamos-update`, and every update wipes any modules you built.
+`setup.sh` detects SteamOS and instead:
+1. clones+builds the driver to `~/.bc250/nct6687d` and `insmod`s it,
+2. writes a `~/.bc250/reload-nct6687.sh` helper — run it after every SteamOS update
+   to rebuild and re-insert the module. The `/etc` config (`force=true`, labels) persists.
+
+### CachyOS
+Uses the `linux-cachyos` kernel, so the headers package is `linux-cachyos-headers`, not
+`linux-headers`. `setup.sh` reads `/usr/lib/modules/$(uname -r)/pkgbase` to pick the right
+package automatically. If it can't, install the matching headers manually and re-run.
+
+### Patch no longer applies
+The upstream `nct6687d` repo occasionally shifts line numbers. Fix by regenerating the patch:
 
 ```sh
 git clone --depth 1 https://github.com/Fred78290/nct6687d.git /tmp/upstream
 $EDITOR /tmp/upstream/nct6687.c   # swap the "CPU Fan"/"Pump Fan" .label strings
 git -C /tmp/upstream diff > 50-nct6687-labels.patch
 ```
+
+### Nothing shows up after a kernel update (non-SteamOS)
+DKMS should rebuild automatically via pacman/apt/dnf hooks. If it didn't:
+
+```sh
+sudo dkms autoinstall
+sudo modprobe nct6687 force=true
+```
+
+### Fan speed sticks at a constant RPM
+Your fan is likely 3-pin (see the gotcha above) — it ignores the PWM line entirely.
