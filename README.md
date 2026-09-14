@@ -144,3 +144,12 @@ sudo modprobe nct6687 force=true
 
 ### Fan speed sticks at a constant RPM
 Your fan is likely 3-pin (see the gotcha above) — it ignores the PWM line entirely.
+
+## Related projects
+
+- [**BC-250 Telemetry**](https://github.com/onlinermm/BC250-Telemetry) — telemetry daemon +
+  web dashboards (V, A, W, temps per VRM/PMIC rail via PMBus, plus CPU/GPU/NVMe/fan),
+  MangoHud & CoolerControl integration. Its `install.sh` auto-installs the same `nct6687`
+  driver + label fix this repo provides when it finds none active, and falls back to the
+  read-only `nct6683` otherwise. Use it together with `bc250-fancurve` for fan control on
+  top of its dashboards.
