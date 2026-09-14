@@ -152,4 +152,7 @@ Your fan is likely 3-pin (see the gotcha above) — it ignores the PWM line enti
   MangoHud & CoolerControl integration. Its `install.sh` auto-installs the same `nct6687`
   driver + label fix this repo provides when it finds none active, and falls back to the
   read-only `nct6683` otherwise. Use it together with `bc250-fancurve` for fan control on
-  top of its dashboards.
+  top of its dashboards. It can also report GDDR6 memory temps — `sudo ./install.sh --memory-temp`
+  patches the GPU SMU at boot (stock P3.0 BIOS; keep other SMU tools like
+  `cyan-skillfish-governor-smu` stopped while it runs): all 8 chips, average and hotspot
+  on the v2 dashboard.
